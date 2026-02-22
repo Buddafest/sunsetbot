@@ -4,6 +4,9 @@
 # Image will be ~2-3 GB due to PyTorch + SentenceTransformers.
 # First startup downloads the embedding model (~90 MB).
 # ============================================================
+# NOTE: Build context is the repo root (set by railway.toml),
+# so all COPY paths are relative to the repo root.
+# ============================================================
 
 FROM python:3.11-slim
 
@@ -15,11 +18,11 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install Python dependencies first (cached layer)
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+# Copy backend application code
+COPY backend/ .
 
 # Port (Railway injects $PORT, default 8000)
 EXPOSE 8000
