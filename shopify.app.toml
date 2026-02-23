@@ -6,7 +6,6 @@ embedded = false
 
 [access_scopes]
 scopes = "read_products,write_products,read_orders,read_customers"
-use_legacy_install_flow = true
 
 [auth]
 redirect_urls = [
@@ -15,8 +14,6 @@ redirect_urls = [
 
 [webhooks]
 api_version = "2024-10"
-
-  [webhooks.subscriptions]
 
 [[webhooks.subscriptions]]
 topics = ["products/create", "products/update", "products/delete", "app/uninstalled"]
