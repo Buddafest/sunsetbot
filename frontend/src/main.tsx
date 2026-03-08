@@ -21,6 +21,7 @@ const shop = scriptTag?.getAttribute('data-shop') || ''
 const server = scriptTag?.getAttribute('data-server') || window.location.origin
 const color = scriptTag?.getAttribute('data-color') || '#FF6B35'
 const position = scriptTag?.getAttribute('data-position') || 'bottom-right'
+const ttsDefault = scriptTag?.getAttribute('data-tts') === 'on'
 
 // Create container with shadow DOM for CSS isolation
 const container = document.createElement('div')
@@ -42,6 +43,7 @@ root.render(
       server={server}
       primaryColor={color}
       position={position as 'bottom-right' | 'bottom-left'}
+      ttsDefault={ttsDefault}
     />
   </React.StrictMode>
 )

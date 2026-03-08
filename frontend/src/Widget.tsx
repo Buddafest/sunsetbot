@@ -44,6 +44,7 @@ interface WidgetProps {
   server: string
   primaryColor: string
   position: 'bottom-right' | 'bottom-left'
+  ttsDefault?: boolean
 }
 
 interface TokenResponse {
@@ -59,7 +60,7 @@ interface TokenResponse {
 // WIDGET COMPONENT
 // ============================================================================
 
-export function Widget({ shop, server, primaryColor, position }: WidgetProps) {
+export function Widget({ shop, server, primaryColor, position, ttsDefault = false }: WidgetProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -69,7 +70,7 @@ export function Widget({ shop, server, primaryColor, position }: WidgetProps) {
 
   // Voice chat state
   const [isRecording, setIsRecording] = useState(false)
-  const [ttsEnabled, setTtsEnabled] = useState(true)
+  const [ttsEnabled, setTtsEnabled] = useState(ttsDefault)
   const [sttSupported, setSttSupported] = useState(false)
   const [ttsSupported, setTtsSupported] = useState(false)
 
@@ -81,7 +82,7 @@ export function Widget({ shop, server, primaryColor, position }: WidgetProps) {
   const maxReconnectAttempts = 5
   const recognitionRef = useRef<any>(null)
   const synthRef = useRef<SpeechSynthesis | null>(null)
-  const ttsEnabledRef = useRef(true)
+  const ttsEnabledRef = useRef(ttsDefault)
   const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null)
 
   // Auto-scroll to bottom on new messages
@@ -901,20 +902,32 @@ function getStyles(primaryColor: string): string {
     /* ─── Mobile Responsive ─── */
     @media (max-width: 440px) {
       .sb-panel {
-        width: calc(100vw - 16px);
-        height: calc(100vh - 80px);
-        bottom: 70px;
-        left: 8px !important;
-        right: 8px !important;
-        border-radius: 12px;
+        width: 100vw;
+        height: calc(100dvh - 60px);
+        max-height: calc(100dvh - 60px);
+        bottom: 56px;
+        left: 0 !important;
+        right: 0 !important;
+        border-radius: 12px 12px 0 0;
       }
       .sb-bubble {
-        width: 52px;
-        height: 52px;
+        width: 48px;
+        height: 48px;
+        bottom: 4px;
       }
       .sb-mic-btn, .sb-send-btn {
         width: 36px;
         height: 36px;
+      }
+      .sb-header {
+        padding: 12px 14px;
+      }
+      .sb-input-area {
+        padding: 8px 10px;
+      }
+      .sb-input {
+        padding: 8px 12px;
+        font-size: 16px;
       }
     }
   `
