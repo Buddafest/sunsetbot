@@ -68,6 +68,7 @@ async def create_subscription(req: CreateSubscriptionRequest):
         store = result.scalar_one()
         store.stripe_subscription_id = sub_result["subscription_id"]
         store.jerry_plan = req.plan
+        store.subscription_status = sub_result.get("status", "incomplete")
 
     return {
         "status": "subscription_created",
@@ -79,7 +80,7 @@ async def create_subscription(req: CreateSubscriptionRequest):
 
 @router.post("/webhooks")
 async def stripe_webhooks(request: Request):
-    """Process Stripe webhook events."""
+    """Process Stripe webhook events — updates store subscription status in DB."""
     from main import billing_service
 
     if not billing_service or not billing_service.configured:
@@ -93,19 +94,89 @@ async def stripe_webhooks(request: Request):
         raise HTTPException(status_code=400, detail="Invalid webhook")
 
     event_type = event["type"]
+    obj = event["data"]["object"]
 
-    if event_type == "invoice.paid":
-        logger.info(f"Invoice paid: {event['data']['object']['id']}")
-    elif event_type == "customer.subscription.updated":
-        sub = event["data"]["object"]
-        logger.info(f"Subscription updated: {sub['id']} status={sub['status']}")
-    elif event_type == "customer.subscription.deleted":
-        sub = event["data"]["object"]
-        logger.info(f"Subscription cancelled: {sub['id']}")
-    else:
-        logger.info(f"Unhandled Stripe event: {event_type}")
+    try:
+        if event_type == "invoice.paid":
+            customer_id = obj.get("customer")
+            if customer_id:
+                store = await _find_store_by_stripe_customer(customer_id)
+                if store:
+                    async with get_db() as db:
+                        result = await db.execute(select(Store).where(Store.id == store.id))
+                        s = result.scalar_one()
+                        s.subscription_status = "active"
+                        s.current_month_usage = 0
+                        # Reset billing cycle from invoice period
+                        lines = obj.get("lines", {}).get("data", [])
+                        if lines:
+                            period_end = lines[0].get("period", {}).get("end")
+                            if period_end:
+                                from datetime import datetime, timezone
+                                s.billing_cycle_reset = datetime.fromtimestamp(period_end, tz=timezone.utc)
+                    logger.info(f"invoice.paid: store={store.shopify_domain} → active, usage reset")
+                else:
+                    logger.warning(f"invoice.paid: no store for customer {customer_id}")
+
+        elif event_type == "invoice.payment_failed":
+            customer_id = obj.get("customer")
+            if customer_id:
+                store = await _find_store_by_stripe_customer(customer_id)
+                if store:
+                    async with get_db() as db:
+                        result = await db.execute(select(Store).where(Store.id == store.id))
+                        s = result.scalar_one()
+                        s.subscription_status = "past_due"
+                    logger.warning(f"invoice.payment_failed: store={store.shopify_domain} → past_due")
+
+        elif event_type == "customer.subscription.updated":
+            sub_id = obj.get("id")
+            stripe_status = obj.get("status", "unknown")
+            if sub_id:
+                store = await _find_store_by_subscription(sub_id)
+                if store:
+                    async with get_db() as db:
+                        result = await db.execute(select(Store).where(Store.id == store.id))
+                        s = result.scalar_one()
+                        s.subscription_status = stripe_status
+                    logger.info(f"subscription.updated: store={store.shopify_domain} → {stripe_status}")
+
+        elif event_type == "customer.subscription.deleted":
+            sub_id = obj.get("id")
+            if sub_id:
+                store = await _find_store_by_subscription(sub_id)
+                if store:
+                    async with get_db() as db:
+                        result = await db.execute(select(Store).where(Store.id == store.id))
+                        s = result.scalar_one()
+                        s.subscription_status = "canceled"
+                    logger.info(f"subscription.deleted: store={store.shopify_domain} → canceled")
+
+        else:
+            logger.info(f"Unhandled Stripe event: {event_type}")
+
+    except Exception as e:
+        logger.error(f"Webhook handler error for {event_type}: {e}", exc_info=True)
 
     return Response(status_code=200)
+
+
+async def _find_store_by_stripe_customer(customer_id: str):
+    """Look up a store by its Stripe customer ID."""
+    async with get_db() as db:
+        result = await db.execute(
+            select(Store).where(Store.stripe_customer_id == customer_id)
+        )
+        return result.scalar_one_or_none()
+
+
+async def _find_store_by_subscription(subscription_id: str):
+    """Look up a store by its Stripe subscription ID."""
+    async with get_db() as db:
+        result = await db.execute(
+            select(Store).where(Store.stripe_subscription_id == subscription_id)
+        )
+        return result.scalar_one_or_none()
 
 
 @router.get("/usage/{store_domain}")

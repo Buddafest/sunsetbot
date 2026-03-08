@@ -253,6 +253,12 @@ app.include_router(shopify_router)
 from app.api.billing import router as billing_router
 app.include_router(billing_router)
 
+from app.api.dashboard import router as dashboard_router
+app.include_router(dashboard_router)
+
+from app.api.admin import router as admin_router
+app.include_router(admin_router)
+
 # ---------------------------------------------------------------------------
 # Serve static files (widget JS bundle)
 # ---------------------------------------------------------------------------
@@ -309,6 +315,30 @@ async def websocket_chat(
             logger.info(f"JWT validated (dev mode) | store={store_id}")
         else:
             logger.warning(f"Invalid JWT in dev mode — allowing connection anyway")
+
+    # --- Subscription gating (production only) ---
+    if settings.is_production:
+        try:
+            from app.db.engine import get_db
+            from app.db.models import Store
+            from sqlalchemy import select as sa_select
+            async with get_db() as db:
+                result = await db.execute(
+                    sa_select(Store).where(
+                        Store.shopify_domain == f"{store_id}.myshopify.com"
+                    )
+                )
+                store_record = result.scalar_one_or_none()
+            if store_record:
+                valid_statuses = {"active", "trialing"}
+                if getattr(store_record, "subscription_status", "none") not in valid_statuses:
+                    await websocket.close(code=4003, reason="Subscription inactive")
+                    return
+            else:
+                logger.warning(f"Store not found for subscription check: {store_id}")
+        except Exception as e:
+            logger.error(f"Subscription check failed: {e}")
+            # Allow connection on check failure (graceful degradation)
 
     # --- Check service availability ---
     if conversation_engine is None:

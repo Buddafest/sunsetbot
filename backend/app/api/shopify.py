@@ -512,8 +512,8 @@ async def _handle_refund_created(shop_domain: str, payload: dict) -> None:
 async def _handle_order_created(shop_domain: str, payload: dict) -> None:
     """
     Handle orders/create webhook for sale attribution.
-    If a chat session was active recently, attribute the sale to Jerry
-    and report revenue share to Stripe billing.
+    Only attributes the sale to Jerry if there was a chat session
+    in the last 24 hours (attribution window).
     """
     order_id = str(payload.get("id", ""))
     order_total = float(payload.get("total_price", 0))
@@ -522,6 +522,36 @@ async def _handle_order_created(shop_domain: str, payload: dict) -> None:
         return
 
     try:
+        # Check for recent chat session (24-hour attribution window)
+        from app.db.engine import get_db
+        from app.db.models import Store, ChatSession
+        from sqlalchemy import select, and_
+        from datetime import datetime, timedelta, timezone
+
+        async with get_db() as db:
+            result = await db.execute(
+                select(Store).where(Store.shopify_domain == shop_domain)
+            )
+            store = result.scalar_one_or_none()
+            if not store:
+                logger.warning(f"Order webhook: store not found for {shop_domain}")
+                return
+
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+            session_result = await db.execute(
+                select(ChatSession).where(
+                    and_(
+                        ChatSession.merchant_id == store.id,
+                        ChatSession.created_at >= cutoff,
+                    )
+                ).limit(1)
+            )
+            recent_session = session_result.scalar_one_or_none()
+
+        if not recent_session:
+            logger.info(f"Order {order_id} not attributed — no chat session in last 24h for {shop_domain}")
+            return
+
         from main import analytics_service
         if analytics_service:
             await analytics_service.record_attributed_sale(
@@ -529,5 +559,6 @@ async def _handle_order_created(shop_domain: str, payload: dict) -> None:
                 shopify_order_id=order_id,
                 order_value=order_total,
             )
+            logger.info(f"Order {order_id} attributed to Jerry — ${order_total} for {shop_domain}")
     except Exception as e:
         logger.error(f"Order attribution failed: {e}", exc_info=True)

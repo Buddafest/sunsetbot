@@ -922,7 +922,7 @@ class _AnalyticsServiceStub:
 # ============================================================================
 
 class _InMemoryContextManager:
-    """In-memory context store. Replace with Redis in production."""
+    """In-memory context store. Fallback when Redis is not configured."""
 
     def __init__(self):
         self._store: dict[str, ConversationContext] = {}
@@ -943,6 +943,49 @@ class _InMemoryContextManager:
 
     async def delete_context(self, session_id: str) -> None:
         self._store.pop(session_id, None)
+
+
+class _RedisContextManager:
+    """Redis-backed context store. Conversations survive server restarts."""
+
+    def __init__(self, redis_url: str):
+        import redis.asyncio as aioredis
+        self._redis = aioredis.from_url(redis_url, decode_responses=True)
+        self._ttl = 86400  # 24-hour TTL
+
+    async def get_context(self, session_id: str, store_id: str) -> ConversationContext:
+        try:
+            data = await self._redis.get(f"jerry:ctx:{session_id}")
+            if data:
+                ctx = ConversationContext.from_json(data)
+                ctx.store = StoreConfig(store_id=store_id)
+                return ctx
+        except Exception as e:
+            logger.warning(f"Redis read failed for {session_id}: {e}")
+
+        ctx = ConversationContext(
+            session_id=session_id,
+            store_id=store_id,
+            store=StoreConfig(store_id=store_id),
+        )
+        await self.save_context(ctx)
+        return ctx
+
+    async def save_context(self, context: ConversationContext) -> None:
+        try:
+            await self._redis.set(
+                f"jerry:ctx:{context.session_id}",
+                context.to_json(),
+                ex=self._ttl,
+            )
+        except Exception as e:
+            logger.warning(f"Redis write failed for {context.session_id}: {e}")
+
+    async def delete_context(self, session_id: str) -> None:
+        try:
+            await self._redis.delete(f"jerry:ctx:{session_id}")
+        except Exception as e:
+            logger.warning(f"Redis delete failed for {session_id}: {e}")
 
 
 # ============================================================================
@@ -970,7 +1013,15 @@ class ConversationEngine:
 
         # Replaced by real ProductIntelligence in main.py at startup
         self._product_intelligence = _MockProductIntelligence()
-        self._context_manager = _InMemoryContextManager()
+
+        # Choose context manager: Redis if available, else in-memory
+        redis_url = os.getenv("REDIS_URL", "")
+        if redis_url:
+            self._context_manager = _RedisContextManager(redis_url)
+            logger.info("Using Redis context manager")
+        else:
+            self._context_manager = _InMemoryContextManager()
+            logger.info("Using in-memory context manager (REDIS_URL not set)")
 
         # Order service — initialized lazily (imported to avoid circular deps)
         self._order_service = None

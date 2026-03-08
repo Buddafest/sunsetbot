@@ -124,6 +124,10 @@ class Store(Base):
         DateTime, nullable=True,
         comment="When current_month_usage resets",
     )
+    subscription_status: Mapped[str] = mapped_column(
+        String(32), default="none",
+        comment="Stripe status: none | trialing | active | past_due | canceled | incomplete",
+    )
 
     # --- Sync state ---
     products_count: Mapped[int] = mapped_column(Integer, default=0)

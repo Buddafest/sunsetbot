@@ -16,5 +16,5 @@ redirect_urls = [
 api_version = "2024-10"
 
 [[webhooks.subscriptions]]
-topics = ["products/create", "products/update", "products/delete", "app/uninstalled", "refunds/create"]
+topics = ["products/create", "products/update", "products/delete", "app/uninstalled", "refunds/create", "orders/create"]
 uri = "https://sunsetbot-production.up.railway.app/shopify/webhooks"

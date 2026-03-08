@@ -100,6 +100,7 @@ async def _migrate_add_missing_columns() -> None:
         ("stores", "monthly_interaction_limit", "INTEGER DEFAULT 500"),
         ("stores", "current_month_usage", "INTEGER DEFAULT 0"),
         ("stores", "billing_cycle_reset", "DATETIME"),
+        ("stores", "subscription_status", "VARCHAR(32) DEFAULT 'none'"),
     ]
 
     from sqlalchemy import text
