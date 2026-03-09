@@ -6,6 +6,7 @@ Handles Stripe subscription management and webhook processing.
 import logging
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from app.db.engine import get_db
@@ -76,6 +77,45 @@ async def create_subscription(req: CreateSubscriptionRequest):
         "client_secret": sub_result.get("client_secret"),
         "plan": req.plan,
     }
+
+
+@router.get("/checkout")
+async def checkout(plan: str = "base"):
+    """Create a Stripe Checkout Session and redirect to Stripe-hosted payment page."""
+    try:
+        import stripe as stripe_mod
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Stripe not available")
+
+    from app.services.billing_service import PLAN_CONFIG
+    import os
+
+    api_key = os.getenv("STRIPE_SECRET_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Billing not configured")
+
+    stripe_mod.api_key = api_key
+
+    config = PLAN_CONFIG.get(plan)
+    if not config:
+        raise HTTPException(status_code=400, detail="Invalid plan. Use 'base' or 'elite'.")
+
+    try:
+        session = stripe_mod.checkout.Session.create(
+            mode="subscription",
+            line_items=[
+                {"price": config["flat_price_id"], "quantity": 1},
+                {"price": config["resolution_price_id"]},
+                {"price": config["revenue_share_price_id"]},
+            ],
+            success_url="https://buddafest.github.io/sunsetbot/?checkout=success",
+            cancel_url="https://buddafest.github.io/sunsetbot/#pricing",
+            allow_promotion_codes=True,
+        )
+        return RedirectResponse(session.url, status_code=303)
+    except Exception as e:
+        logger.error(f"Failed to create checkout session: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create checkout session")
 
 
 @router.post("/webhooks")
